@@ -111,6 +111,8 @@ class GPT(nn.Module):
     ):
         super().__init__()
         self.embedding = nn.Embedding(cfg.vocab_size, cfg.input_dim)
+        # nn.Embedding init uses std 1, while nn.Linear init uses std based on Kaiming uniform
+        nn.init.normal_(self.embedding.weight, mean=0.0, std=0.05)
         self.blocks = nn.ModuleList([
             Block(cfg.input_dim, cfg.attn_hidden_dim, cfg.mlp_hidden_dim, cfg.n_heads) for _ in range(cfg.n_blocks)
         ])
