@@ -1,16 +1,15 @@
 import torch
 import torch.nn as nn
-from dataclasses import dataclass
 
 from basic_dataloader import BasicDataLoader
 from basic_gpt import GPT, ModelConfig
 
 
-@dataclass
 class TrainConfig:
     batch_size: int
-    num_steps: int
     lr: float
+    clip_grad: float
+    num_steps: int
     log_steps: int
 
 
@@ -42,6 +41,7 @@ def train(
             ignore_index = data_loader.tokenizer.pad_token_id
         )
         loss.backward()
+        grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=cfg.clip_grad)
         optimizer.step()
 
         if i % cfg.log_steps == 0:
@@ -51,8 +51,9 @@ def train(
 if __name__ == "__main__":
     train_cfg = TrainConfig(
         batch_size=64,
-        num_steps=500,
         lr=3e-4,
+        clip_grad=1.0,
+        num_steps=500,
         log_steps=10,
     )
 
