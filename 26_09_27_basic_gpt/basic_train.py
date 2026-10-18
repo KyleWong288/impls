@@ -1,20 +1,26 @@
+import os
 import torch
 import torch.nn as nn
 
 from basic_dataloader import BasicDataLoader
 from basic_gpt import GPT, ModelConfig
+from dataclasses import dataclass
+from transformers import PreTrainedModel
 
 
+@dataclass
 class TrainConfig:
     batch_size: int
     lr: float
     clip_grad: float
-    num_steps: int
+    train_steps: int
     log_steps: int
+    save_steps: int
+    save_dir: str
 
 
 def train(
-    model: nn.Module,
+    model: PreTrainedModel,
     data_loader: BasicDataLoader,
     cfg: TrainConfig
 ):
@@ -26,7 +32,7 @@ def train(
     optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.lr)
 
     model.train()
-    for i in range(cfg.num_steps):
+    for step in range(cfg.train_steps):
         # inputs and targets are (B, S)
         inputs, targets = next(ds_iter)
         device = next(model.parameters()).device
@@ -44,8 +50,16 @@ def train(
         grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=cfg.clip_grad)
         optimizer.step()
 
-        if i % cfg.log_steps == 0:
-            print(f"Step {i}: loss={loss.item()}")
+        # Save checkpoint
+        if (step + 1) % cfg.save_steps == 0:
+            print(f"Saving checkpoint step {step}: loss={loss.item()}, grad_norm={grad_norm.item()}")
+            checkpoint_path = os.path.join(cfg.save_dir, f"checkpoint-{step + 1}")
+            model.save_pretrained(checkpoint_path, safe_serialization=True)
+            data_loader.tokenizer.save_pretrained(checkpoint_path)
+
+        # Log checkpoint
+        elif step % cfg.log_steps == 0:
+            print(f"Logging step {step}: loss={loss.item()}, grad_norm={grad_norm.item()}")
 
 
 if __name__ == "__main__":
@@ -53,8 +67,10 @@ if __name__ == "__main__":
         batch_size=64,
         lr=3e-4,
         clip_grad=1.0,
-        num_steps=500,
+        train_steps=500,
         log_steps=10,
+        save_steps=50,
+        save_dir="./checkpoints/"
     )
 
     data_loader = BasicDataLoader(
@@ -83,4 +99,3 @@ if __name__ == "__main__":
     print(f"Training {parameter_count:,} parameters on {device}")
 
     train(model, data_loader, train_cfg)
-    

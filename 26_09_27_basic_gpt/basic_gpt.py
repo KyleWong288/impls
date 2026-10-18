@@ -1,16 +1,29 @@
 import torch
 import torch.nn as nn
-from dataclasses import dataclass
+from transformers import PreTrainedConfig, PreTrainedModel
 
 
-@dataclass
-class ModelConfig:
-    vocab_size: int
-    input_dim: int
-    attn_hidden_dim: int
-    mlp_hidden_dim: int
-    n_heads: int
-    n_blocks: int
+# Inherit from HF config base class, which requires defaults and kwargs plumbing
+class ModelConfig(PreTrainedConfig):
+    model_type = "basic_gpt"
+
+    def __init__(
+        self,
+        vocab_size: int = 50258,
+        input_dim: int = 128,
+        attn_hidden_dim: int = 128,
+        mlp_hidden_dim: int = 512,
+        n_heads: int = 4,
+        n_blocks: int = 4,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.vocab_size = vocab_size
+        self.input_dim = input_dim
+        self.attn_hidden_dim = attn_hidden_dim
+        self.mlp_hidden_dim = mlp_hidden_dim
+        self.n_heads = n_heads
+        self.n_blocks = n_blocks
 
 
 # Expects BHSD format, where D is head_dim
@@ -104,26 +117,37 @@ class Block(nn.Module):
         return x
 
 
-class GPT(nn.Module):
+# Inherit from HF model class
+class GPT(PreTrainedModel):
+    config_class = ModelConfig
+    _tied_weights_keys = {
+        "lm_head.weight": "embedding.weight",
+    }
+
     def __init__(
         self,
-        cfg: ModelConfig
+        config: ModelConfig
     ):
-        super().__init__()
-        self.embedding = nn.Embedding(cfg.vocab_size, cfg.input_dim)
+        super().__init__(config)
+        self.embedding = nn.Embedding(config.vocab_size, config.input_dim)
         # nn.Embedding init uses std 1, while nn.Linear init uses std based on Kaiming uniform
         nn.init.normal_(self.embedding.weight, mean=0.0, std=0.05)
         self.blocks = nn.ModuleList([
-            Block(cfg.input_dim, cfg.attn_hidden_dim, cfg.mlp_hidden_dim, cfg.n_heads) for _ in range(cfg.n_blocks)
+            Block(
+                config.input_dim,
+                config.attn_hidden_dim,
+                config.mlp_hidden_dim,
+                config.n_heads
+            ) for _ in range(config.n_blocks)
         ])
-        self.norm = nn.LayerNorm(cfg.input_dim)
-        self.lm_head = nn.Linear(cfg.input_dim, cfg.vocab_size, bias=False)
+        self.norm = nn.LayerNorm(config.input_dim)
+        self.lm_head = nn.Linear(config.input_dim, config.vocab_size, bias=False)
         # Tie weights for less params
         self.lm_head.weight = self.embedding.weight
 
     # x is (B, S)
-    def forward(self, x: torch.Tensor):
-        x = self.embedding(x) # (B, S, input_dim)
+    def forward(self, input_ids: torch.Tensor):
+        x = self.embedding(input_ids) # (B, S, input_dim)
         for block in self.blocks:
             x = block(x)
         x = self.norm(x)
