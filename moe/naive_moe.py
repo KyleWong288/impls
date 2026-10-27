@@ -10,24 +10,24 @@ class ModelConfigMoE(ModelConfig):
     
     def __init__(
         self,
-        num_experts: int = 8,
+        n_experts: int = 8,
         top_k: int = 2,
         **kwargs,
     ):
         super().__init__(**kwargs)
-        self.num_experts = num_experts
+        self.n_experts = n_experts
         self.top_k = top_k
 
 
 class NaiveMoE(nn.Module):
-    def __init__(self, input_dim: int, hidden_dim: int, num_experts: int, top_k: int):
+    def __init__(self, input_dim: int, hidden_dim: int, n_experts: int, top_k: int):
         super().__init__()
-        self.router = nn.Linear(input_dim, num_experts, bias=False)
+        self.router = nn.Linear(input_dim, n_experts, bias=False)
         self.experts = nn.ModuleList(
-            [MLP(input_dim, hidden_dim) for _ in range(num_experts)]
+            [MLP(input_dim, hidden_dim) for _ in range(n_experts)]
         ) 
         self.top_k = top_k
-        self.num_experts = num_experts
+        self.n_experts = n_experts
 
     # x is (B, S, input_dim)
     def forward(self, x: torch.Tensor):
@@ -35,7 +35,7 @@ class NaiveMoE(nn.Module):
         total_tokens = batch_size * seq_len
 
         # Compute router probs
-        router_scores = self.router(x) # (B, S, num_experts)
+        router_scores = self.router(x) # (B, S, n_experts)
         router_probs = router_scores.softmax(dim=-1)
 
         # Compute selected experts and renormalize
@@ -72,14 +72,14 @@ class Block(nn.Module):
         attn_hidden_dim: int,
         mlp_hidden_dim: int,
         n_heads: int,
-        num_experts: int,
+        n_experts: int,
         top_k: int
     ):
         super().__init__()
         self.norm1 = nn.LayerNorm(input_dim)
         self.attn = MultiHeadAttention(input_dim, attn_hidden_dim, n_heads)
         self.norm2 = nn.LayerNorm(input_dim)
-        self.moe = NaiveMoE(input_dim, mlp_hidden_dim, num_experts, top_k)
+        self.moe = NaiveMoE(input_dim, mlp_hidden_dim, n_experts, top_k)
 
     # x is (B, S, input_dim)
     def forward(self, x: torch.Tensor):
@@ -109,7 +109,7 @@ class NaiveMoEGPT(PreTrainedModel):
                 config.attn_hidden_dim,
                 config.mlp_hidden_dim,
                 config.n_heads,
-                config.num_experts,
+                config.n_experts,
                 config.top_k
             ) for _ in range(config.n_blocks)
         ])
