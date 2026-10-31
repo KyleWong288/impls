@@ -1,4 +1,5 @@
 import os
+import time
 import torch
 import torch.nn as nn
 
@@ -31,14 +32,19 @@ def train(
     # Set up optimizer
     optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.lr)
 
+    # Set up timing metrics
+    start_time = time.perf_counter()
+
     model.train()
     for step in range(cfg.train_steps):
+
         # inputs and targets are (B, S)
         inputs, targets = next(ds_iter)
         device = next(model.parameters()).device
         inputs = inputs.to(device)
         targets = targets.to(device)
 
+        # Forward and backward
         optimizer.zero_grad(set_to_none=True)
         logits = model(inputs) # (B, S, V)
         loss = nn.functional.cross_entropy(
@@ -59,17 +65,22 @@ def train(
 
         # Log checkpoint
         elif step % cfg.log_steps == 0:
-            print(f"Logging step {step}: loss={loss.item()}, grad_norm={grad_norm.item()}")
+            # item() implicitly synchronizes device because it copies to CPU, which makes our timing accurate
+            loss_value = loss.item()
+            grad_norm_value = grad_norm.item()
+            mean_step_time = (time.perf_counter() - start_time) / (step + 1)
+            print(f"Logging step {step}: loss={loss_value:.4f}, grad_norm={grad_norm_value:.4f}, mean_step_time={mean_step_time:.4f}s")
 
 
+# ~20M params, ~400M tokens
 if __name__ == "__main__":
     train_cfg = TrainConfig(
-        batch_size=64,
+        batch_size=256,
         lr=3e-4,
         clip_grad=1.0,
-        train_steps=500,
+        train_steps=6000,
         log_steps=10,
-        save_steps=50,
+        save_steps=500,
         save_dir="./checkpoints/"
     )
 
@@ -80,11 +91,11 @@ if __name__ == "__main__":
 
     model_cfg = ModelConfig(
         vocab_size=len(data_loader.tokenizer),
-        input_dim=128,
-        attn_hidden_dim=128,
-        mlp_hidden_dim=512,
+        input_dim=256,
+        attn_hidden_dim=256,
+        mlp_hidden_dim=1024,
         n_heads=4,
-        n_blocks=4,
+        n_blocks=8,
     )
 
     if torch.cuda.is_available():
