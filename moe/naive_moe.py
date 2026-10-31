@@ -76,9 +76,9 @@ class Block(nn.Module):
         top_k: int
     ):
         super().__init__()
-        self.norm1 = nn.LayerNorm(input_dim)
+        self.norm1 = nn.RMSNorm(input_dim)
         self.attn = MultiHeadAttention(input_dim, attn_hidden_dim, n_heads)
-        self.norm2 = nn.LayerNorm(input_dim)
+        self.norm2 = nn.RMSNorm(input_dim)
         self.moe = NaiveMoE(input_dim, mlp_hidden_dim, n_experts, top_k)
 
     # x is (B, S, input_dim)
@@ -113,7 +113,7 @@ class NaiveMoEGPT(PreTrainedModel):
                 config.top_k
             ) for _ in range(config.n_blocks)
         ])
-        self.norm = nn.LayerNorm(config.input_dim)
+        self.norm = nn.RMSNorm(config.input_dim)
         self.lm_head = nn.Linear(config.input_dim, config.vocab_size, bias=False)
         # Tie weights for less params
         self.lm_head.weight = self.embedding.weight
