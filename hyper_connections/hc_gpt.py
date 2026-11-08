@@ -1,10 +1,26 @@
 import torch
 import torch.nn as nn
 from transformers import PreTrainedModel
-from basic_gpt.basic_gpt import MLP, MultiHeadAttention
+from basic_gpt.basic_gpt import MLP, ModelConfig, MultiHeadAttention
 
 
+# Inherit from HF config base class, which requires defaults and kwargs plumbing
+class ModelConfigHc(ModelConfig):
+    model_type = "hc_gpt"
+    
+    def __init__(
+        self,
+        n_streams: int = 4,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.n_streams = n_streams
 
+
+# Pre routing: before the attn/mlp, we mix the N residual streams into a single stream input. Thus, we need to learn read strengths
+# Post routing: after the attn/mlp, we distribute the single stream output across the N residual streams. Thus, we need to learn write strengths
+# Res routing: controls how much of each old stream contributes to each next stream
+# H = α * tanh(projection(X)) + b, so we need α, projection, and b
 class HyperConnection(nn.Module):
     def __init__(
         self,
@@ -20,9 +36,11 @@ class HyperConnection(nn.Module):
         self.branch_norm = nn.RMSNorm(dim)
         self.routing_norm = nn.RMSNorm(dim)
 
-        # H = α * projection(X) + b, so we need α, projection, and b
+        # Generates one read weight per stream, collapses N streams into 1
         self.pre_proj = nn.Linear(dim, 1, bias=False)
+        # Generates one write weight per stream, expands 1 stream into N
         self.post_proj = nn.Linear(dim, 1, bias=False)
+        # Generates an N x N matrix allowing pairwise flow from any input stream to any output stream
         self.res_proj = nn.Linear(dim, n_streams, bias=False)
 
         # Initialize HC as an ordinary residual connections (zeros)
@@ -101,4 +119,46 @@ class HcBlock(nn.Module):
 
 # Inherit from HF model class
 class HcGPT(PreTrainedModel):
-    pass
+    config_class = ModelConfigHc
+    _tied_weights_keys = {
+        "lm_head.weight": "embedding.weight",
+    }
+    
+    def __init__(
+        self,
+        config: ModelConfigHc
+    ):
+        super().__init__(config)
+        self.embedding = nn.Embedding(config.vocab_size, config.input_dim)
+        # nn.Embedding init uses std 1, while nn.Linear init uses std based on Kaiming uniform
+        nn.init.normal_(self.embedding.weight, mean=0.0, std=0.05)
+        self.blocks = nn.ModuleList([
+            HcBlock(
+                config.input_dim,
+                config.attn_hidden_dim,
+                config.mlp_hidden_dim,
+                config.n_heads,
+                config.n_streams,
+                block_index
+            ) for block_index in range(config.n_blocks)
+        ])
+        self.norm = nn.RMSNorm(config.input_dim)
+        self.lm_head = nn.Linear(config.input_dim, config.vocab_size, bias=False)
+        # Tie weights for less params
+        self.lm_head.weight = self.embedding.weight
+        self.n_streams = config.n_streams
+
+    # x is (B, S)
+    def forward(self, input_ids: torch.Tensor):
+        x = self.embedding(input_ids) # (B, S, input_dim)
+        
+        # Initial expansion via replicating
+        x = x.unsqueeze(2).expand(-1, -1, self.n_streams, -1) # (B, S, n_streams, input_dim)
+        for block in self.blocks:
+            x = block(x)
+        
+        # Final compression via summing
+        x = x.sum(dim=2) # (B, S, input_dim)
+        x = self.norm(x)
+        logits = self.lm_head(x) # (B, S, V)
+        return logits
