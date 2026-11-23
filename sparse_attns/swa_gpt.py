@@ -6,7 +6,7 @@ from transformers import PreTrainedModel
 
 
 # Inherit from HF config base class, which requires defaults and kwargs plumbing
-class ModelConfigLooped(ModelConfig):
+class ModelConfigSwa(ModelConfig):
     model_type = "swa_gpt"
     
     def __init__(
@@ -90,14 +90,14 @@ class SwaBlock(nn.Module):
 
 # Config supports ratio between SWA and full self attn
 class SwaGPT(PreTrainedModel):
-    config_class = ModelConfigLooped
+    config_class = ModelConfigSwa
     _tied_weights_keys = {
         "lm_head.weight": "embedding.weight",
     }
 
     def __init__(
         self,
-        config: ModelConfigLooped
+        config: ModelConfigSwa
     ):
         super().__init__(config)
         self.embedding = nn.Embedding(config.vocab_size, config.input_dim)
